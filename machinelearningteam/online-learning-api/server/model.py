@@ -1,15 +1,17 @@
-import csv
-
+import dill
+import numpy as np
 import pandas as pd
-from sklearn.feature_extraction.text import CountVectorizer
+
 from sklearn import preprocessing as prep
+from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.metrics import precision_recall_fscore_support
 from sklearn.naive_bayes import MultinomialNB
 from sklearn.pipeline import Pipeline, FeatureUnion, make_pipeline
-import dill
-
-import numpy as np
 
 np.random.seed(2302)
+#  column names for dataframe
+fieldnames = ["", "CompanyId", "BankEntryDate", "BankEntryText", "BankEntryAmount", "AccountName",
+              "AccountNumber", "AccountTypeName", "AccountNumberPredicted"]
 
 
 def column_selector(column_name):
@@ -17,59 +19,68 @@ def column_selector(column_name):
         lambda X: X[column_name], validate=False)
 
 
-def predict(data):
+def predict(data: pd.DataFrame):
+    """
+    Loads a model from savefile or creates a new one if file doesn't exist. Runs prediction on incoming data and returns
+    predicted labels.
+    :param data: Incoming Pandas Dataframe
+    :type data: pd.DataFrame
+    :return: Predicted labels
+    :rtype: List
+    """
     try:
+        #  load model if it exists
         loaded = dill.load(open('naive_bayes_classifier.pkl', 'rb'))
-        prediction = loaded.predict(pd.DataFrame(data,index=[0]))
+        prediction = loaded.predict(data)
         return prediction
 
     except FileNotFoundError:
-        return None
-
-
-def update(data):
-    fieldnames = ["", "CompanyId", "BankEntryDate", "BankEntryText", "BankEntryAmount", "AccountName",
-                  "AccountNumber", "AccountTypeName"]
-    with open('samples.csv', 'a+') as file:
-        writer = csv.DictWriter(file, fieldnames, lineterminator='\n')
-        for row in data:
-            writer.writerow(row)
-
-    try:
-        loaded = dill.load(open('naive_bayes_classifier.pkl', 'rb'))
-        train = pd.read_csv('samples.csv', names=fieldnames)
-        Y_train = train.AccountNumber
-        loaded.fit(train, Y_train)
-        return True
-
-    except FileNotFoundError:
-        data = pd.read_csv('samples.csv', names=fieldnames)
-        data['split'] = np.random.random(data.shape[0])
-        test = data[data.split > 0.5]
-        train = data[data.split <= 0.5]
-        Y_test = test.AccountNumber
-        Y_train = train.AccountNumber
+        #  create model if it doesn't
+        train = data
+        y_train = train.AccountNumber
 
         vectorizer = CountVectorizer(max_features=10000)
         amount_encoder = CountVectorizer(max_features=50)
-        companyId_encoder = CountVectorizer(max_features=500)
+        company_id_encoder = CountVectorizer(max_features=500)
         all_features = FeatureUnion(
             [
-                ['company', make_pipeline(column_selector('CompanyId'), companyId_encoder)],
+                ['company', make_pipeline(column_selector('CompanyId'), company_id_encoder)],
                 ['text', make_pipeline(column_selector('BankEntryText'), vectorizer)],
                 ['amount', make_pipeline(column_selector('BankEntryAmount'), amount_encoder)],
             ])
         classifier = MultinomialNB()
         model = Pipeline([('features', all_features), ('nb', classifier)])
-        model.fit(train, Y_train)
+        model.fit(train, y_train)
         dill.dump(model, open('naive_bayes_classifier.pkl', 'wb'))
+        prediction = model.predict(data)
+        return prediction
 
-        return False
+
+def update(data: pd.DataFrame):
+    """
+    Loads classifier from the savefile and trains using new data. Saves the model after training.
+    :param data: Incoming Pandas DataFrame
+    :type data: pd.DataFrame
+    """
+    with open('samples.csv', 'a+') as file:
+        data.to_csv(file, header=False, index=False, line_terminator='\n')
+        loaded = dill.load(open('naive_bayes_classifier.pkl', 'rb'))
+        train = pd.read_csv('samples.csv', names=fieldnames)
+        y_train = train.AccountNumber
+        loaded.fit(train, y_train)
+        dill.dump(loaded, open('naive_bayes_classifier.pkl', 'wb'))
 
 
-def metrics():
-    try:
-        data = pd.read_csv('samples.csv')
-
-    except FileNotFoundError:
-        return
+def metrics(n: int):
+    """
+    Reads last n records in samples file, extracts true and predicted labels and computes precision and recall
+    :param n: Number of last predictions to evaluate
+    :type n: int
+    :return: Precision and recall values of last n predictions
+    :rtype: (float, float)
+    """
+    data = pd.read_csv('samples.csv', names=fieldnames)
+    data = data.iloc[-n:]
+    precision, recall, _, _ = precision_recall_fscore_support(
+        data['AccountNumber'], data['AccountNumberPredicted'], average='weighted', zero_division=0)
+    return precision, recall
