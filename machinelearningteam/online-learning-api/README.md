@@ -1,3 +1,16 @@
+# Solution
+
+The flask server is awaiting API calls. The client, when run, will first send around 15000 samples from `bank_expenses_obfuscated.csv` in chunks of random size using the `/sample` endpoint. After it is done it sends the `/metrics/1000` request every second for 10 seconds. Since the server is processing the samples in the meantime, we can observe changing performance of the model. Finally, it sends single request for prediction taken from model/model.py using the `/predict` endpoint. 
+
+The server takes the input data from `/sample` calls and sends them to a multiprocessing queue where a subprocess is waiting to process the data (predict labels and train the model). This is to make API available for the next request (at least for the same endpoint, when I was sending the samples in rapid succession it would accept the next sample only after it was done processing the current one). While it's processing the samples the `/metrics` calls start arriving, and the server reports the current state of the model for the requested number of past predictions. We can see the metrics (precision, recall) change in time. When the `/predict` call arrives, the server uses the current model to predict the value.
+
+`/server/model.py` contains functions for using and updating the model and calculating its metrics.
+
+1. Run `/server/main.py` to start API server.
+2. Run `/client/client.py` to start sending requests to the server.
+
+### Martin Medvec
+
 # Assignment used for Data Engineering Position
 
 In this assignment you will build a simple online learning API that is also able to report the health of the API.
