@@ -9,8 +9,9 @@ from model import predict, update, metrics
 
 
 class API:
-    def __init__(self, queue):
+    def __init__(self, queue, lock):
         self.queue = queue
+        self.lock = lock
         self.app = None
 
     def start(self, host='127.0.0.1', port=5000):
@@ -54,7 +55,9 @@ class API:
                 return '', http.HTTPStatus.BAD_REQUEST
             content = json.loads(json_data)
             df = pd.DataFrame(content)
+            lock.acquire()
             prediction = predict(df)
+            lock.release()
             return json.dumps([{'AccountNumber': str(prediction[0])}])
 
         @self.app.route("/metrics/<int:n>", methods=['GET'])
@@ -68,13 +71,15 @@ class API:
                 500:
                     internal error, probably bad input.
             """
+            lock.acquire()
             precision, recall = metrics(n)
+            lock.release()
             return json.dumps([{'precision': str(precision), 'recall': str(recall)}])
 
         self.app.run(host=host, port=port, debug=True)
 
 
-def predict_and_update_model(queue):
+def predict_and_update_model(queue, lock):
     """
     Waits for data to be present in queue. Then predicts labels and trains the model when the data arrive.
     :param queue: A multiprocessing queue
@@ -84,16 +89,19 @@ def predict_and_update_model(queue):
         data = queue.get()
         prediction = predict(data)
         data['AccountNumberPredicted'] = prediction
+        lock.acquire()
         update(data)
+        lock.release()
         print(f'Processed {data.shape[0]} samples')
 
 
 if __name__ == "__main__":
     #  Initialize process that will process incoming data to not hold up API
-    q = mp.Queue()
-    p = mp.Process(target=predict_and_update_model, args=(q,))
+    queue = mp.Queue()
+    lock = mp.Lock()
+    p = mp.Process(target=predict_and_update_model, args=(queue, lock,))
     p.start()
 
     #  Initialize and start the server
-    a = API(q)
+    a = API(queue, lock)
     a.start()

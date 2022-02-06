@@ -59,7 +59,7 @@ def predict(data: pd.DataFrame):
 def update(data: pd.DataFrame):
     """
     Saves the samples with predicted values to sample file.
-    Loads classifier from the savefile and trains using new data. Saves the model after training.
+    Loads classifier from the savefile and trains using saved data. Saves the model after training.
     :param data: Incoming Pandas DataFrame
     :type data: pd.DataFrame
     """
